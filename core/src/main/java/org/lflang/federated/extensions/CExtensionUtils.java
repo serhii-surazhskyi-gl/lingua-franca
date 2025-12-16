@@ -331,6 +331,119 @@ public class CExtensionUtils {
    */
   public static String generateFederateNeighborStructure(FederateInstance federate) {
     var code = new CodeBuilder();
+
+    code.indent();
+    code.pr(
+        String.join(
+            "\n",
+            "typedef struct immediate_upstream {",
+            "       uint16_t id;",
+            "       int64_t  delay;",
+            "} immediate_upstream_st_t;",
+            "\n",
+            "typedef struct immediate_downstream {",
+            "       uint16_t id;",
+            "} immediate_downstream_st_t;")
+    );
+
+    code.pr(
+        String.join(
+            "\n",
+            "/* TODO: the maximum numbers can be changed */",
+            "#define MAX_UPSTREAMS 10",
+            "#define MAX_DOWNSTREAMS 10",
+            "\n",
+            "typedef struct neighbor_structure {",
+            "       int32_t                     num_immediate_upstreams;",
+            "       int32_t                     num_immediate_downstreams;",
+            "       struct immediate_upstream   immediate_upstreams[MAX_UPSTREAMS];",
+            "       struct immediate_downstream immediate_downstreams[MAX_DOWNSTREAMS];",
+            "} neighbor_stucture_st_t;",
+            "\n"
+        )
+    );
+
+    code.pr(
+        String.join(
+            "\n",
+            "/* Generated number of downstreams and upstreams with fed_ids */",
+            "neighbor_stucture_st_t neighbors = {",
+            "       .num_immediate_upstreams   = " + federate.dependsOn.keySet().size() + ",",
+            "       .immediate_upstreams = {"
+            )
+    );
+
+    if (!federate.dependsOn.keySet().isEmpty()) {
+      // Next, populate these arrays.
+      // Find the minimum delay in the process.
+      // FIXME: Zero delay is not really the same as a microstep delay.
+      for (FederateInstance upstreamFederate : federate.dependsOn.keySet()) {
+        code.pr("               {");
+        code.pr("                        .id = " + upstreamFederate.id + ",");
+
+        // The minimum delay calculation needs to be made in the C code because it
+        // may depend on parameter values.
+        // FIXME: These would have to be top-level parameters, which don't really
+        // have any support yet. Ideally, they could be overridden on the command line.
+        // When that is done, they will need to be in scope here.
+        var delays = federate.dependsOn.get(upstreamFederate);
+        if (delays != null) {
+          // There is at least one delay, so find the minimum.
+          // If there is no delay at all, this is encoded as NEVER.
+          for (Expression delay : delays) {
+            if (delay == null) {
+              // Use NEVER to encode no delay at all.
+              code.pr("                        .delay = NEVER,");
+            } else {
+              var delayTime =
+                  delay instanceof ParameterReference
+                      // In that case use the default value.
+                      ? CTypes.getInstance()
+                          .getTargetTimeExpr(
+                              ASTUtils.getDefaultAsTimeValue(
+                                  ((ParameterReference) delay).getParameter()))
+                      : CTypes.getInstance().getTargetExpr(delay, InferredType.time());
+
+              code.pr(
+                  String.join(
+                      "\n",
+                        "                        .delay = (" + delayTime + " < FOREVER) ? " + delayTime + ": FOREVER,"
+                  )
+            );
+            }
+          }
+        } else {
+          // Use NEVER to encode no delay at all.
+          code.pr("                .delay = NEVER,");
+        }
+        code.pr("               },");
+      }
+    }
+
+    code.pr("       },");
+
+    code.pr(
+        String.join(
+            "",
+            "       .num_immediate_downstreams = " + federate.sendsTo.keySet().size() + ","
+        )
+    );
+
+    code.pr("       .immediate_downstreams = {");
+
+    // Next, set up the downstream array.
+    if (!federate.sendsTo.keySet().isEmpty()) {
+      // Next, populate the array.
+      for (FederateInstance downstreamFederate : federate.sendsTo.keySet()) {
+        code.pr("               {");
+        code. pr("                 .id = " + downstreamFederate.id + ",");
+        code.pr("               },");
+      }
+    }
+    code.pr("       },");
+    code.pr("};");
+
+
     code.pr(
         String.join(
             "\n",
